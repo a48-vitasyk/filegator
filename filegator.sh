@@ -10,7 +10,6 @@ function log () {
 ip_server=$(echo $SSH_CONNECTION | awk '{print $3}')
 host=$(hostname)
 
-
 function password_root() {
 clear
   echo ""
