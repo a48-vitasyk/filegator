@@ -24,16 +24,19 @@ clear
   done
   stty echo
   echo ""
-  echo "The password is: $password"
 }
 
 
 
 function hash_password() {
-if [[ -d /usr/share/filegator/ ]]; then
-  password_hash=$password
-  salt="$2y$10$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 22)"
-  hash=$(php -r '
+    log "Starting hash_password function"
+
+    if [[ -d /usr/share/filegator/ ]]; then
+        log "Directory /usr/share/filegator/ found"
+
+        password_hash=$password
+        salt="$2y$10$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 22)"
+        hash=$(php -r '
            require_once "/usr/share/filegator/backend/Utils/PasswordHash.php";
            $password = "'"$password_hash"'";
            $salt = "'"$salt"'";
@@ -41,109 +44,152 @@ if [[ -d /usr/share/filegator/ ]]; then
            echo $hash;
        ')
 
-  wget -q http://$ip_server/filegator/
+        log "Password has been hashed: **********"
 
-  sleep 1
+        wget -q http://$ip_server/filegator/
+        log "Made request to http://$ip_server/filegator/"
 
-  sed -i '0,/"password":/{s#"password":"[^"]*"#"password":"'"$hash"'"#}' /usr/share/filegator/private/users.json
-else
-  echo ""
-fi
+        sleep 1
+
+        sed -i '0,/"password":/{s#"password":"[^"]*"#"password":"'"$hash"'"#}' /usr/share/filegator/private/users.json
+        log "Password in /usr/share/filegator/private/users.json has been updated"
+    else
+        log "Directory /usr/share/filegator/ not found"
+        echo ""
+    fi
+
+    log "Ending hash_password function"
 }
 
 function install_filegator() {
+    log "Starting install_filegator function"
 
-msg "${ORANGE}[Progress]${NOFORMAT} Installing Filegator (Apache + Nginx)..."
+        echo ""
 
-  # Check PHP version
-  PHP_VERSION=$(php -r "echo PHP_VERSION;")
-  REQUIRED_PHP_VERSION="7.2.5"
+    msg "${ORANGE}[Progress]${NOFORMAT} Installing Filegator (Apache + Nginx)..."
 
-  if [ "$(printf '%s\n' "$REQUIRED_PHP_VERSION" "$PHP_VERSION" | sort -V | head -n1)" != "$REQUIRED_PHP_VERSION" ]; then
-    echo "Filegator requires PHP $REQUIRED_PHP_VERSION or later. Your current version is $PHP_VERSION."
-    return
-  fi
+        echo ""
 
-  if [[ -d /usr/share/filegator ]]; then
-    echo "Filegator is already installed."
-  else
-    echo "Filegator is not installed. Installing now..."
+    # Check PHP version
+    log "Checking PHP version"
+    PHP_VERSION=$(php -r "echo PHP_VERSION;")
+    REQUIRED_PHP_VERSION="7.2.5"
 
-    for attempt in {1..3}; do
-      wget https://github.com/filegator/static/raw/master/builds/filegator_latest.zip -P /usr/share/
-      if [ $? -eq 0 ]; then
-        break
-      fi
-      echo "Attempt $attempt failed. Retrying in 5 seconds..."
-      sleep 5
-    done
-
-    unzip -o /usr/share/filegator_latest.zip -d /usr/share/ >/dev/null
-    chown -R admin:admin /usr/share/filegator &&  chmod -R 775 /usr/share/filegator >/dev/null && chmod +rx /home/backup >/dev/null
-
-    # Make config for Apache
-    if [[ -f /etc/httpd/conf.d/filegator.conf ]]; then
-      sudo rm /etc/httpd/conf.d/filegator.conf
+    if [ "$(printf '%s\n' "$REQUIRED_PHP_VERSION" "$PHP_VERSION" | sort -V | head -n1)" != "$REQUIRED_PHP_VERSION" ]; then
+        log "Filegator requires PHP $REQUIRED_PHP_VERSION or later. Your current version is $PHP_VERSION."
+        echo "Filegator requires PHP $REQUIRED_PHP_VERSION or later. Your current version is $PHP_VERSION."
+        return
     fi
-    touch /etc/httpd/conf.d/filegator.conf
-    tee -a /etc/httpd/conf.d/filegator.conf << END >/dev/null
-    Alias /filegator /usr/share/filegator
 
-    <Directory /usr/share/filegator>
-        Order Deny,Allow
-        Deny from All
-        Allow from All
-    </Directory>
+    if [[ -d /usr/share/filegator ]]; then
+        log "Filegator is already installed."
+        echo "Filegator is already installed."
+        echo ""
 
-    <Directory /usr/share/filegator/dist>
-        Order Deny,Allow
-        Deny from All
-        Allow from All
-    </Directory>
+    else
+        log "Filegator is not installed. Starting installation process..."
+        echo "Filegator is not installed. Installing now..."
+        echo ""
+
+        for attempt in {1..3}; do
+            log "Downloading Filegator, attempt $attempt"
+            wget https://github.com/filegator/static/raw/master/builds/filegator_latest.zip -P /usr/share/ &> /dev/null
+            if [ $? -eq 0 ]; then
+                log "Filegator download successful on attempt $attempt"
+                break
+            fi
+            log "Attempt $attempt failed. Retrying in 5 seconds..."
+            echo "Attempt $attempt failed. Retrying in 5 seconds..."
+            sleep 5
+        done
+
+        log "Unzipping and setting permissions for Filegator"
+        unzip -o /usr/share/filegator_latest.zip -d /usr/share/ >/dev/null
+        chown -R admin:admin /usr/share/filegator && chmod -R 775 /usr/share/filegator >/dev/null && chmod +rx /home/backup >/dev/null
+
+        # Make config for Apache
+        log "Configuring Apache for Filegator"
+        if [[ -f /etc/httpd/conf.d/filegator.conf ]]; then
+            log "Removing existing Apache config for Filegator"
+            sudo rm /etc/httpd/conf.d/filegator.conf
+        fi
+        touch /etc/httpd/conf.d/filegator.conf
+        tee -a /etc/httpd/conf.d/filegator.conf << END >/dev/null
+        Alias /filegator /usr/share/filegator
+
+        <Directory /usr/share/filegator>
+            Order Deny,Allow
+            Deny from All
+            Allow from All
+        </Directory>
+
+        <Directory /usr/share/filegator/dist>
+            Order Deny,Allow
+            Deny from All
+            Allow from All
+        </Directory>
 END
+        log "Apache configuration for Filegator has been set"
 
-    # Change root directory configuration.php
-    sudo sed -i "s#__DIR__\.'/repository'#'/home'#g" /usr/share/filegator/configuration.php
+        # Change root directory configuration.php
+        log "Updating root directory in configuration.php for Filegator"
+        sudo sed -i "s#__DIR__\.'/repository'#'/home'#g" /usr/share/filegator/configuration.php
 
-    systemctl restart httpd
-  fi
+        log "Restarting httpd service"
+        systemctl restart httpd
+    fi
 
-  wget -q http://$ip_server/filegator/
+    log "Making a test request to Filegator"
+    wget -q http://$ip_server/filegator/
+
+    log "Ending install_filegator function"
 }
 
 function install_filegator_fpm() {
-echo ""
-msg "${ORANGE}[Progress]${NOFORMAT} Installing Filegator (Nginx+PHP-FPM)..."
-echo ""
-  # Check PHP version
-  PHP_VERSION=$(php -r "echo PHP_VERSION;")
-  REQUIRED_PHP_VERSION="7.2.5"
+    log "Starting install_filegator_fpm function"
 
-  if [ "$(printf '%s\n' "$REQUIRED_PHP_VERSION" "$PHP_VERSION" | sort -V | head -n1)" != "$REQUIRED_PHP_VERSION" ]; then
-    echo "Filegator requires PHP $REQUIRED_PHP_VERSION or later. Your current version is $PHP_VERSION."
-    return
-  fi
+    echo ""
+    msg "${ORANGE}[Progress]${NOFORMAT} Installing Filegator (Nginx+PHP-FPM)..."
+    echo ""
 
-  if [[ -d /usr/share/filegator ]]; then
-    echo "Filegator is already installed."
-  else
-    echo "Filegator is not installed. Installing now..."
+    # Check PHP version
+    log "Checking PHP version"
+    PHP_VERSION=$(php -r "echo PHP_VERSION;")
+    REQUIRED_PHP_VERSION="7.2.5"
 
-    for attempt in {1..3}; do
-      wget https://github.com/filegator/static/raw/master/builds/filegator_latest.zip -P /usr/share/
-      if [ $? -eq 0 ]; then
-        break
-      fi
-      echo "Attempt $attempt failed. Retrying in 5 seconds..."
-      sleep 5
-    done
+    if [ "$(printf '%s\n' "$REQUIRED_PHP_VERSION" "$PHP_VERSION" | sort -V | head -n1)" != "$REQUIRED_PHP_VERSION" ]; then
+        log "Filegator requires PHP $REQUIRED_PHP_VERSION or later. Your current version is $PHP_VERSION."
+        echo "Filegator requires PHP $REQUIRED_PHP_VERSION or later. Your current version is $PHP_VERSION."
+        return
+    fi
 
-    unzip -o /usr/share/filegator_latest.zip -d /usr/share/ &>/dev/null && chown -R root:admin /usr/share/filegator && chmod -R 775 /usr/share/filegator
+    if [[ -d /usr/share/filegator ]]; then
+        log "Filegator is already installed."
+        echo "Filegator is already installed."
+        echo ""
+    else
+        log "Filegator is not installed. Starting installation process..."
+        echo "Filegator is not installed. Installing now..."
+        echo ""
 
-# create file /etc/nginx/conf.d/filegator-phpmyadmin-roundcube.conf
+        for attempt in {1..3}; do
+            log "Downloading Filegator, attempt $attempt"
+            wget https://github.com/filegator/static/raw/master/builds/filegator_latest.zip -P /usr/share/ &> /dev/null
+            if [ $? -eq 0 ]; then
+                log "Filegator download successful on attempt $attempt"
+                break
+            fi
+            log "Attempt $attempt failed. Retrying in 5 seconds..."
+            echo "Attempt $attempt failed. Retrying in 5 seconds..."
+            sleep 5
+        done
 
-    touch /etc/nginx/conf.d/filegator-phpmyadmin-roundcube.conf
-    tee -a /etc/nginx/conf.d/filegator-phpmyadmin-roundcube.conf << EOF >/dev/null
+        log "Unzipping and setting permissions for Filegator"
+        unzip -o /usr/share/filegator_latest.zip -d /usr/share/ &>/dev/null && chown -R root:admin /usr/share/filegator && chmod -R 775 /usr/share/filegator
+
+        log "Creating Nginx configuration for Filegator, phpMyAdmin, and Roundcube"
+        touch /etc/nginx/conf.d/filegator-phpmyadmin-roundcube.conf
+        tee -a /etc/nginx/conf.d/filegator-phpmyadmin-roundcube.conf << EOF >/dev/null
 server {
     listen $ip_server:80;
     server_name _;
@@ -211,74 +257,95 @@ server {
 
 EOF
 
-# Restart Nginx & php-fpm
-systemctl restart nginx && systemctl restart php-fpm
+        log "Restarting Nginx and php-fpm services"
+        systemctl restart nginx && systemctl restart php-fpm
 
-# Change root directory configuration.php
-sed -i "s#__DIR__\.'/repository'#'/home'#g" /usr/share/filegator/configuration.php
+        log "Updating root directory in configuration.php for Filegator"
+        sed -i "s#__DIR__\.'/repository'#'/home'#g" /usr/share/filegator/configuration.php
 
-usermod -a -G admin apache && chmod +rx /home/admin && chmod +rx /home/backup && chmod -R 775 /home/admin/web && chown -R apache:apache /usr/share/filegator/private/logs && chown -R apache:apache /usr/share/filegator/repository
-fi
+        log "Modifying user groups and setting permissions"
+        usermod -a -G admin apache && chmod +rx /home/admin && chmod +rx /home/backup && chmod -R 775 /home/admin/web && chown -R apache:apache /usr/share/filegator/private/logs && chown -R apache:apache /usr/share/filegator/repository
+    fi
 
-wget -q http://$ip_server/filegator/
+    log "Making a test request to Filegator"
+    wget -q http://$ip_server/filegator/
+
+    log "Ending install_filegator_fpm function"
 }
 
 
 function info_filegator() {
-  clear
+    log "Starting info_filegator function"
 
-  # Проверка доступности по IP
-  IP_CHECK_HTTP=$(curl --insecure -I -L http://$ip_server/filegator/ 2>/dev/null | head -n 1 | cut -d$' ' -f2)
+    clear
 
-  # Если доступность по IP подтверждена
-  if [[ "$IP_CHECK_HTTP" == 200 ]]; then
-    echo " "
-    for i in {17..21} {21..17} ; do echo -en "\e[38;5;${i}m#####\e[0m" ; done ; echo
-    echo -e ""
-    msg "The FileGator has been installed. The credentials:"
-    echo ""
-    msg "${ORANGE}File Manager${NOFORMAT} Start From PHP 7.2"
-    msg "http://$ip_server/filegator/"
-    msg "User: admin"
-    msg "Password: $password\n"
-    msg "${ORANGE}Applications:${NOFORMAT}"
-    msg "${GREEN}[Ok]${NOFORMAT} Filegator http://$ip_server/filegator/"
-    for i in {17..21} {21..17} ; do echo -en "\e[38;5;${i}m#####\e[0m" ; done ; echo
-    echo " "
+    # Check IP accessibility
+    log "Checking IP accessibility for FileGator"
+    IP_CHECK_HTTP=$(curl --insecure -I -L http://$ip_server/filegator/ 2>/dev/null | head -n 1 | cut -d$' ' -f2)
 
-  else
-    msg "${RED}[Error]${NOFORMAT} Failed to get a response when accessing FileGator (http://$ip_server/filegator/), most likely an error occurred during installation."
-  fi
+    # If IP accessibility is confirmed
+    if [[ "$IP_CHECK_HTTP" == 200 ]]; then
+        log "FileGator is accessible at http://$ip_server/filegator/"
+        echo " "
+        for i in {17..21} {21..17} ; do echo -en "\e[38;5;${i}m#####\e[0m" ; done ; echo
+        echo -e ""
+        msg "The FileGator has been installed. The credentials:"
+        echo ""
+        msg "${ORANGE}File Manager:"
+        msg "http://$ip_server/filegator/"
+        msg "User: admin"
+        msg "Password: $password\n"
+        msg "${ORANGE}Applications:${NOFORMAT}"
+        msg "${GREEN}[Ok]${NOFORMAT} Filegator http://$ip_server/filegator/"
+        for i in {17..21} {21..17} ; do echo -en "\e[38;5;${i}m#####\e[0m" ; done ; echo
+        echo " "
+    else
+        log "Failed to get a response when accessing FileGator at http://$ip_server/filegator/"
+        msg "${RED}[Error]${NOFORMAT} Failed to get a response when accessing FileGator (http://$ip_server/filegator/), most likely an error occurred during installation."
+    fi
 
-  echo -e "username = admin\npassword = $password" > /root/.filegator_data
+    log "Saving FileGator credentials to /root/.filegator_data"
+    echo -e "username = admin\npassword = $password" > /root/.filegator_data
+
+    log "Ending info_filegator function"
 }
 
 function filegator_centos() {
-  clear
+    log "Starting filegator_centos function"
 
-  # Check PHP version
-  PHP_VERSION=$(php -r "echo PHP_VERSION;")
-  REQUIRED_PHP_VERSION="7.2.5"
+    clear
 
-  if [ "$(printf '%s\n' "$REQUIRED_PHP_VERSION" "$PHP_VERSION" | sort -V | head -n1)" != "$REQUIRED_PHP_VERSION" ]; then
-    msg "${RED}[Error]${NOFORMAT} Filegator requires PHP $REQUIRED_PHP_VERSION or later. Your current version is $PHP_VERSION."
-    return
-  fi
+    # Check PHP version
+    log "Checking PHP version"
+    PHP_VERSION=$(php -r "echo PHP_VERSION;")
+    REQUIRED_PHP_VERSION="7.2.5"
 
-  # Проверка на наличие Apache и Nginx
-  APACHE_RUNNING=$(ps aux | grep httpd | grep -v grep)
-  NGINX_RUNNING=$(ps aux | grep nginx | grep -v grep)
-  PHP_FPM_RUNNING=$(ps aux | grep php-fpm | grep -v grep)
+    if [ "$(printf '%s\n' "$REQUIRED_PHP_VERSION" "$PHP_VERSION" | sort -V | head -n1)" != "$REQUIRED_PHP_VERSION" ]; then
+        log "Filegator requires PHP $REQUIRED_PHP_VERSION or later. Your current version is $PHP_VERSION."
+        msg "${RED}[Error]${NOFORMAT} Filegator requires PHP $REQUIRED_PHP_VERSION or later. Your current version is $PHP_VERSION."
+        return
+    fi
 
-  if [[ ! -z "$APACHE_RUNNING" && ! -z "$NGINX_RUNNING" ]]; then
-    msg "${ORANGE}Detected:${NOFORMAT} Apache + Nginx"
-    password_root ; install_filegator ; hash_password ;
-  elif [[ ! -z "$NGINX_RUNNING" && ! -z "$PHP_FPM_RUNNING" ]]; then
-    msg "${ORANGE}Detected:${NOFORMAT} Nginx + PHP-FPM"
-    password_root ; install_filegator_fpm ; hash_password ;
-  else
-    msg "${RED}[Error]${NOFORMAT} No supported configurations detected. Please ensure either Apache + Nginx or Nginx + PHP-FPM are running." && exit 0;
-  fi
+    # Check for Apache and Nginx
+    log "Checking for running Apache and Nginx services"
+    APACHE_RUNNING=$(ps aux | grep httpd | grep -v grep)
+    NGINX_RUNNING=$(ps aux | grep nginx | grep -v grep)
+    PHP_FPM_RUNNING=$(ps aux | grep php-fpm | grep -v grep)
+
+    if [[ ! -z "$APACHE_RUNNING" && ! -z "$NGINX_RUNNING" ]]; then
+        log "Detected Apache + Nginx configuration"
+        msg "${ORANGE}Detected:${NOFORMAT} Apache + Nginx"
+        password_root ; install_filegator ; hash_password ;
+    elif [[ ! -z "$NGINX_RUNNING" && ! -z "$PHP_FPM_RUNNING" ]]; then
+        log "Detected Nginx + PHP-FPM configuration"
+        msg "${ORANGE}Detected:${NOFORMAT} Nginx + PHP-FPM"
+        password_root ; install_filegator_fpm ; hash_password ;
+    else
+        log "No supported configurations detected. Please ensure either Apache + Nginx or Nginx + PHP-FPM are running."
+        msg "${RED}[Error]${NOFORMAT} No supported configurations detected. Please ensure either Apache + Nginx or Nginx + PHP-FPM are running." && exit 0;
+    fi
+
+    log "Ending filegator_centos function"
 }
 
 
